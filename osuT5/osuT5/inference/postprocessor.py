@@ -672,31 +672,38 @@ class Postprocessor(object):
         return round(median_bpm * 10) / 10
 
     def consolidate_timing_bpms(self, timing: list[TimingPoint], preferred_bpm: Optional[float]) -> list[TimingPoint]:
+        """Force all timing points to use a single BPM value.
+        
+        This enforces the rule that only ONE BPM timing point should be generated.
+        All redlines will use the preferred BPM, and redundant redlines are removed.
+        """
         if preferred_bpm is None or len(timing) == 0:
             return timing
         
         preferred_mpb = 60000 / preferred_bpm
-        tolerance = 0.10
         
+        # Force ALL redlines to use the preferred BPM (no tolerance - always use preferred)
         for tp in timing:
-            if tp.parent is not None: 
+            if tp.parent is not None:  # Skip inherited timing points (greenlines)
                 continue
-            
-            current_bpm = 60000 / tp.ms_per_beat if tp.ms_per_beat > 0 else 0
-            if current_bpm > 0 and abs(current_bpm - preferred_bpm) / preferred_bpm <= tolerance:
-                tp.ms_per_beat = preferred_mpb
+            # Force this redline to use the preferred BPM
+            tp.ms_per_beat = preferred_mpb
         
+        # Remove redundant redlines - keep only the first one since all have same BPM now
         consolidated_timing = []
-        last_redline_mpb = None
+        has_redline = False
         
         for tp in timing:
-            if tp.parent is not None: 
+            if tp.parent is not None:  # Keep all inherited timing points (greenlines)
                 consolidated_timing.append(tp)
                 continue
             
-            if last_redline_mpb is None or abs(tp.ms_per_beat - last_redline_mpb) > 0.001:
+            # This is a redline - only keep the first one
+            if not has_redline:
                 consolidated_timing.append(tp)
-                last_redline_mpb = tp.ms_per_beat
+                has_redline = True
+            # Skip all subsequent redlines since they have the same BPM
+        
         return consolidated_timing
 
 
