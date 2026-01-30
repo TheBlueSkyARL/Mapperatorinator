@@ -674,35 +674,36 @@ class Postprocessor(object):
     def consolidate_timing_bpms(self, timing: list[TimingPoint], preferred_bpm: Optional[float]) -> list[TimingPoint]:
         """Force all timing points to use a single BPM value.
         
-        This enforces the rule that only ONE BPM timing point should be generated.
-        All redlines will use the preferred BPM, and redundant redlines are removed.
+        This enforces the rule that all redlines use the SAME BPM.
+        Redlines at different times are kept (for measure counting), but they all use the preferred BPM.
+        Only truly redundant redlines (same time, same BPM) are removed.
         """
         if preferred_bpm is None or len(timing) == 0:
             return timing
         
         preferred_mpb = 60000 / preferred_bpm
         
-        # Force ALL redlines to use the preferred BPM (no tolerance - always use preferred)
+        # Force ALL redlines to use the preferred BPM
         for tp in timing:
             if tp.parent is not None:  # Skip inherited timing points (greenlines)
                 continue
-            # Force this redline to use the preferred BPM
             tp.ms_per_beat = preferred_mpb
         
-        # Remove redundant redlines - keep only the first one since all have same BPM now
+        # Remove only truly redundant redlines (consecutive redlines at very close times)
         consolidated_timing = []
-        has_redline = False
+        last_redline_offset = None
         
         for tp in timing:
-            if tp.parent is not None:  # Keep all inherited timing points (greenlines)
+            if tp.parent is not None:  # Keep all greenlines
                 consolidated_timing.append(tp)
                 continue
             
-            # This is a redline - only keep the first one
-            if not has_redline:
+            # This is a redline - keep it unless it's at the same offset as the last redline
+            current_offset = round(tp.offset.total_seconds() * 1000)
+            if last_redline_offset is None or abs(current_offset - last_redline_offset) > 1:
                 consolidated_timing.append(tp)
-                has_redline = True
-            # Skip all subsequent redlines since they have the same BPM
+                last_redline_offset = current_offset
+            # Skip duplicate redlines at same offset
         
         return consolidated_timing
 
