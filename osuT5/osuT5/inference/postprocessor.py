@@ -324,11 +324,20 @@ class Postprocessor(object):
                 total_duration = group.time - slider_head.time
 
                 if total_duration <= 0 or span_duration <= 0:
-                    self.logger.warning(f"Warning: Invalid slider duration at {slider_start_time}")
-                    slider_head = None
-                    last_anchor = None
-                    anchor_info = []
-                    continue
+                    # Try to fix instead of skipping
+                    if total_duration <= 0:
+                        total_duration = 1
+                    if span_duration <= 0:
+                        span_duration = total_duration
+                    
+                    if total_duration > 0 and span_duration > 0:
+                         self.logger.info(f"Fixed invalid slider duration at {slider_start_time}")
+                    else:
+                        self.logger.warning(f"Warning: Could not fix invalid slider duration at {slider_start_time}")
+                        slider_head = None
+                        last_anchor = None
+                        anchor_info = []
+                        continue
 
                 slides = max(int(round(total_duration / span_duration)), 1)
                 span_duration = total_duration / slides
@@ -647,68 +656,9 @@ class Postprocessor(object):
 
         return None
 
-    def get_preferred_bpm(self, markers: list['Postprocessor.Marker']) -> Optional[float]:
-        if len(markers) < 2:
-            return None
-            
-        bpms = []
-        for i in range(1, len(markers)):
-            time_diff = markers[i].time - markers[i-1].time
-            beats = markers[i].beats_from_last_marker
-            if time_diff > 0 and beats > 0:
-                mpb = time_diff / beats
-                if 100 < mpb < 3000: 
-                    bpms.append(60000 / mpb)
-        
-        if not bpms:
-            return None
-        
+    def generate_timing(self, events: list[Event], single_bpm: bool = False) -> list[TimingPoint]:
+        """Generate timing points from a list of Event objects."""
 
-        median_bpm = np.median(bpms)
-        if abs(round(median_bpm) - median_bpm) < 0.5:
-            return round(median_bpm)
-        if abs(round(median_bpm * 2) / 2 - median_bpm) < 0.25:
-            return round(median_bpm * 2) / 2
-        return round(median_bpm * 10) / 10
-
-    def consolidate_timing_bpms(self, timing: list[TimingPoint], preferred_bpm: Optional[float]) -> list[TimingPoint]:
-        """Force all timing points to use a single BPM value.
-        
-        This enforces the rule that all redlines use the SAME BPM.
-        Redlines at different times are kept (for measure counting), but they all use the preferred BPM.
-        Only truly redundant redlines (same time, same BPM) are removed.
-        """
-        if preferred_bpm is None or len(timing) == 0:
-            return timing
-        
-        preferred_mpb = 60000 / preferred_bpm
-        
-        # Force ALL redlines to use the preferred BPM
-        for tp in timing:
-            if tp.parent is not None:  # Skip inherited timing points (greenlines)
-                continue
-            tp.ms_per_beat = preferred_mpb
-        
-        # Remove only truly redundant redlines (consecutive redlines at very close times)
-        consolidated_timing = []
-        last_redline_offset = None
-        
-        for tp in timing:
-            if tp.parent is not None:  # Keep all greenlines
-                consolidated_timing.append(tp)
-                continue
-            
-            # This is a redline - keep it unless it's at the same offset as the last redline
-            current_offset = round(tp.offset.total_seconds() * 1000)
-            if last_redline_offset is None or abs(current_offset - last_redline_offset) > 1:
-                consolidated_timing.append(tp)
-                last_redline_offset = current_offset
-            # Skip duplicate redlines at same offset
-        
-        return consolidated_timing
-
-
-    def generate_timing(self, events: list[Event]) -> list[TimingPoint]:
         markers: list[Postprocessor.Marker] = []
         step = 1 if self.types_first else -1
         for i, event in enumerate(events):
@@ -724,9 +674,6 @@ class Postprocessor(object):
             return []
 
         markers.sort(key=lambda x: x.time)
-
-        # Calculate preferred BPM for consolidation
-        preferred_bpm = self.get_preferred_bpm(markers)
 
         timing: list[TimingPoint] = []
 
@@ -744,6 +691,17 @@ class Postprocessor(object):
             timing = [
                 TimingPoint(timedelta(milliseconds=markers[0].time), 1000, 4, 2, -1, 100, None, False)
             ]
+
+        if single_bpm and len(markers) > 1:
+            # Calculate a single best-fit BPM for the entire map
+            duration = markers[-1].time - markers[0].time
+            total_beats = sum(m.beats_from_last_marker for m in markers[1:])
+            
+            if total_beats > 0:
+                mpb = self.get_ms_per_beat(duration, total_beats, 0)
+                mpb = self.human_round_ms_per_beat(mpb, markers, timing[0])
+                timing[0].ms_per_beat = mpb
+                return [timing[0]]
 
         counter = 0
         last_measure_time = markers[0].time
@@ -886,9 +844,6 @@ class Postprocessor(object):
                     tp_change = TimingPointsChange(tp, mpb=True, uninherited=True)
                     timing = tp_change.add_change(timing, True)
                 counter = 0
-
-        # Consolidate similar BPM values to maintain consistency
-        timing = self.consolidate_timing_bpms(timing, preferred_bpm)
 
         return timing
 

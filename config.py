@@ -74,6 +74,7 @@ class InferenceConfig:
     use_server: bool = True  # Use server for optimized multiprocess inference
     max_batch_size: int = 16  # Maximum batch size for inference (only used for parallel sampling or super timing)
     resnap_events: bool = True  # Resnap notes to the timing after generation
+    force_single_bpm: bool = True  # Force a single BPM timing point
 
     # Metadata settings
     bpm: Optional[int] = None  # Beats per minute of input audio

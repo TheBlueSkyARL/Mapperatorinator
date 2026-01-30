@@ -417,7 +417,7 @@ def generate(
     if args.super_timing and ContextType.NONE in args.in_context:
         super_timing_generator = SuperTimingGenerator(args, model, tokenizer)
         timing_events, timing_times = super_timing_generator.generate(audio, generation_config, verbose=verbose)
-        timing = postprocessor.generate_timing(timing_events)
+        timing = postprocessor.generate_timing(timing_events, single_bpm=args.force_single_bpm)
         extra_in_context[ContextType.TIMING] = timing
         if ContextType.TIMING in output_type:
             output_type.remove(ContextType.TIMING)
@@ -433,7 +433,7 @@ def generate(
             verbose=verbose,
         )[0]
         timing_events, timing_times = events_of_type(timing_events, timing_times, TIMING_TYPES)
-        timing = postprocessor.generate_timing(timing_events)
+        timing = postprocessor.generate_timing(timing_events, single_bpm=args.force_single_bpm)
         extra_in_context[ContextType.TIMING] = timing
         if ContextType.TIMING in output_type:
             output_type.remove(ContextType.TIMING)
@@ -457,7 +457,7 @@ def generate(
         events, _ = reduce(merge_events, result)
 
         if timing is None and (ContextType.TIMING in args.output_type or args.train.data.add_timing):
-            timing = postprocessor.generate_timing(events)
+            timing = postprocessor.generate_timing(events, single_bpm=args.force_single_bpm)
 
         # Resnap timing events
         if args.resnap_events and timing is not None:
