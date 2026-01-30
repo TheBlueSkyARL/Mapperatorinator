@@ -647,9 +647,60 @@ class Postprocessor(object):
 
         return None
 
-    def generate_timing(self, events: list[Event]) -> list[TimingPoint]:
-        """Generate timing points from a list of Event objects."""
+    def get_preferred_bpm(self, markers: list['Postprocessor.Marker']) -> Optional[float]:
+        if len(markers) < 2:
+            return None
+            
+        bpms = []
+        for i in range(1, len(markers)):
+            time_diff = markers[i].time - markers[i-1].time
+            beats = markers[i].beats_from_last_marker
+            if time_diff > 0 and beats > 0:
+                mpb = time_diff / beats
+                if 100 < mpb < 3000: 
+                    bpms.append(60000 / mpb)
+        
+        if not bpms:
+            return None
+        
 
+        median_bpm = np.median(bpms)
+        if abs(round(median_bpm) - median_bpm) < 0.5:
+            return round(median_bpm)
+        if abs(round(median_bpm * 2) / 2 - median_bpm) < 0.25:
+            return round(median_bpm * 2) / 2
+        return round(median_bpm * 10) / 10
+
+    def consolidate_timing_bpms(self, timing: list[TimingPoint], preferred_bpm: Optional[float]) -> list[TimingPoint]:
+        if preferred_bpm is None or len(timing) == 0:
+            return timing
+        
+        preferred_mpb = 60000 / preferred_bpm
+        tolerance = 0.10
+        
+        for tp in timing:
+            if tp.parent is not None: 
+                continue
+            
+            current_bpm = 60000 / tp.ms_per_beat if tp.ms_per_beat > 0 else 0
+            if current_bpm > 0 and abs(current_bpm - preferred_bpm) / preferred_bpm <= tolerance:
+                tp.ms_per_beat = preferred_mpb
+        
+        consolidated_timing = []
+        last_redline_mpb = None
+        
+        for tp in timing:
+            if tp.parent is not None: 
+                consolidated_timing.append(tp)
+                continue
+            
+            if last_redline_mpb is None or abs(tp.ms_per_beat - last_redline_mpb) > 0.001:
+                consolidated_timing.append(tp)
+                last_redline_mpb = tp.ms_per_beat
+        return consolidated_timing
+
+
+    def generate_timing(self, events: list[Event]) -> list[TimingPoint]:
         markers: list[Postprocessor.Marker] = []
         step = 1 if self.types_first else -1
         for i, event in enumerate(events):
@@ -665,6 +716,9 @@ class Postprocessor(object):
             return []
 
         markers.sort(key=lambda x: x.time)
+
+        # Calculate preferred BPM for consolidation
+        preferred_bpm = self.get_preferred_bpm(markers)
 
         timing: list[TimingPoint] = []
 
@@ -824,6 +878,9 @@ class Postprocessor(object):
                     tp_change = TimingPointsChange(tp, mpb=True, uninherited=True)
                     timing = tp_change.add_change(timing, True)
                 counter = 0
+
+        # Consolidate similar BPM values to maintain consistency
+        timing = self.consolidate_timing_bpms(timing, preferred_bpm)
 
         return timing
 
