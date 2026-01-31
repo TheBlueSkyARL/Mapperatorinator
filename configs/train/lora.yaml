@@ -9,9 +9,9 @@ enable_lora: true              # Use LoRA for finetuning
 pretrained_path: "OliBomby/Mapperatorinator-v30"     # Path to pretrained model weights
 
 data:                  # Data settings
-  dataset_type: "ors"
-  train_dataset_path: "datasets/quality_dataset"
-  test_dataset_path: ""
+  dataset_type: "mmrs"
+  train_dataset_path: "datasets/v30_dataset"
+  test_dataset_path: "datasets/v30_dataset"
   train_dataset_start: 0
   train_dataset_end: 38689
   test_dataset_start: 38689
