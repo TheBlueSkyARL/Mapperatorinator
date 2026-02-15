@@ -7,12 +7,6 @@ compile: true          # PyTorch 2.0 optimization
 precision: 'bf16'         # Enable mixed precision (no/fp16/bf16/fp8)
 attn_implementation: 'flash_attention_2'  # Attention implementation (eager/sdpa/flash_attention_2)
 
-model:
-  overwrite:
-    encoder_layers: 3
-    decoder_layers: 9
-    num_hidden_layers: 9
-
 data:                  # Data settings
   dataset_type: "mmrs"
   train_dataset_path: "/workspace/datasets/MMRS39389"
@@ -79,6 +73,7 @@ data:                  # Data settings
   max_year: 2023  # Maximum year of the beatmap to include in the dataset
   slider_version: 2  # Slider version to use (1 or 2)
   snapping_random_prob: 0.25  # Probability of randomizing hit object snapping in the dataset
+  sustain_interval: 8000  # Time in milliseconds between sustain tokens for held notes. Should be shorter than the lookback window.
 
 dataloader:             # Dataloader settings
   num_workers: 8

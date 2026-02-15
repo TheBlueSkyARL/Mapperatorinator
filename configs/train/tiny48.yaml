@@ -7,12 +7,6 @@ compile: true          # PyTorch 2.0 optimization
 precision: 'bf16'         # Enable mixed precision (no/fp16/bf16/fp8)
 attn_implementation: 'flash_attention_2'  # Attention implementation (eager/sdpa/flash_attention_2)
 
-model:
-  overwrite:
-    encoder_layers: 3
-    decoder_layers: 9
-    num_hidden_layers: 9
-
 data:                  # Data settings
   dataset_type: "mmrs"
   train_dataset_path: "/workspace/datasets/MMRS39389"
@@ -62,8 +56,8 @@ data:                  # Data settings
   per_track: true
   add_distances: false   # Model hit object distances
   add_positions: true
-  position_precision: 2 # Precision of hit object coordinates
-  position_split_axes: true  # Split hit object X and Y coordinates into separate tokens
+  position_precision: 32 # Precision of hit object coordinates
+  position_split_axes: false  # Split hit object X and Y coordinates into separate tokens
   dt_augment_prob: 0.0   # Probability of augmenting the dataset with DT
   dt_augment_range: [1., 1.2]  # Range of DT augmentation
   dt_augment_sqrt: true  # Sample DT augmentation from a square root distribution
@@ -79,6 +73,8 @@ data:                  # Data settings
   max_year: 2023  # Maximum year of the beatmap to include in the dataset
   slider_version: 2  # Slider version to use (1 or 2)
   snapping_random_prob: 0.25  # Probability of randomizing hit object snapping in the dataset
+  sustain_interval: 8000  # Time in milliseconds between sustain tokens for held notes. Should be shorter than the lookback window.
+  position_refinement: 2  # Add a second pass of position tokens with higher precision
 
 dataloader:             # Dataloader settings
   num_workers: 8
