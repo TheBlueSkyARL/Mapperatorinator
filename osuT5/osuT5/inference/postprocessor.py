@@ -324,20 +324,21 @@ class Postprocessor(object):
                 total_duration = group.time - slider_head.time
 
                 if total_duration <= 0 or span_duration <= 0:
-                    # Try to fix instead of skipping
-                    if total_duration <= 0:
-                        total_duration = 1
-                    if span_duration <= 0:
-                        span_duration = total_duration
+                    # Convert to hit circle instead of generating an invalid slider
+                    self.logger.info(f"Fixed invalid slider duration at {slider_start_time} by converting to circle")
                     
-                    if total_duration > 0 and span_duration > 0:
-                         self.logger.info(f"Fixed invalid slider duration at {slider_start_time}")
-                    else:
-                        self.logger.warning(f"Warning: Could not fix invalid slider duration at {slider_start_time}")
-                        slider_head = None
-                        last_anchor = None
-                        anchor_info = []
-                        continue
+                    body_hitsound = self.get_hitsound(slider_head.hit_sound)
+                    body_sampleset = slider_head.sampleset
+                    body_addition = slider_head.addition
+                    
+                    hit_object_strings.append(
+                        f"{int(round(slider_head.x))},{int(round(slider_head.y))},{slider_start_time},{5 if slider_head.new_combo else 1},{body_hitsound},{body_sampleset}:{body_addition}:-1:0:"
+                    )
+                    
+                    slider_head = None
+                    last_anchor = None
+                    anchor_info = []
+                    continue
 
                 slides = max(int(round(total_duration / span_duration)), 1)
                 span_duration = total_duration / slides
@@ -460,6 +461,38 @@ class Postprocessor(object):
         # Sort the hit objects and timing points
         beatmap._hit_objects.sort(key=lambda ho: ho.time)
         beatmap.timing_points.sort(key=lambda tp: tp.offset)
+
+        # Deep fix overlaps and objects < 10ms apart to prevent AiMod errors
+        i = 0
+        while i < len(beatmap._hit_objects) - 1:
+            curr_ho = beatmap._hit_objects[i]
+            next_ho = beatmap._hit_objects[i + 1]
+            
+            curr_end = getattr(curr_ho, 'end_time', curr_ho.time)
+            gap = (next_ho.time - curr_end).total_seconds() * 1000
+            
+            if gap < 10:
+                if type(curr_ho).__name__ == "Slider":
+                    curr_duration = (curr_end - curr_ho.time).total_seconds() * 1000
+                    target_duration = (next_ho.time - curr_ho.time).total_seconds() * 1000 - 10
+                    
+                    if target_duration > 0 and curr_duration > 0:
+                        curr_ho.length = curr_ho.length * (target_duration / curr_duration)
+                        curr_ho.__dict__.pop('end_time', None)
+                        i += 1
+                    else:
+                        beatmap._hit_objects.pop(i + 1)
+                elif type(curr_ho).__name__ == "Spinner":
+                    target_end = next_ho.time - timedelta(milliseconds=10)
+                    if target_end > curr_ho.time:
+                        curr_ho.end_time = target_end
+                        i += 1
+                    else:
+                        beatmap._hit_objects.pop(i + 1)
+                else:
+                    beatmap._hit_objects.pop(i + 1)
+            else:
+                i += 1
 
         # If the SV or volume or BPM differs at the start time, add a new timing point
         if len(result_beatmap.timing_points) > 0 and len(beatmap.timing_points) > 0:
