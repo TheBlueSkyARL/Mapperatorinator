@@ -11,3 +11,8 @@ test_inference_mai_mod.py
 *.lck
 .env
 .agent
+datasets
+config.json
+online_cache.jsonl
+output.txt
+Mapperator.ConsoleApp.exe
