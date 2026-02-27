@@ -70,9 +70,9 @@ def main(args: TrainConfig):
         from peft import LoraConfig, get_peft_model
         lora_config = LoraConfig(**args.lora)
         model = get_peft_model(model, lora_config)
-        lora_params = {n: p for n, p in model.named_parameters() if "lora" in n}
-        for n, p in lora_params.items():
-            print(n, p.sum())
+        # lora_params = {n: p for n, p in model.named_parameters() if "lora" in n}
+        # for n, p in lora_params.items():
+        #     print(n, p.sum())
         model.print_trainable_parameters()
 
     optimizer = get_optimizer(model, args)
