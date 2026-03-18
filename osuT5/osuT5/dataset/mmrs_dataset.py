@@ -747,8 +747,8 @@ class BeatmapDatasetIterable:
 
             # Make sure we only generate scroll speed contexts for mania
             # Other gamemodes already model all SVs in the map context
-            if beatmap_metadata["ModeInt"] != 3 and ContextType.SV in context_info["out"]:
-                context_info["out"].remove(ContextType.SV)
+            # if beatmap_metadata["ModeInt"] != 3 and ContextType.SV in context_info["out"]:
+            #     context_info["out"].remove(ContextType.SV)
 
         beatmap_path = self.path / "data" / beatmap_metadata["BeatmapSetFolder"] / beatmap_metadata["BeatmapFile"]
         frames, frame_times = self._get_frames(audio_samples)
@@ -770,7 +770,7 @@ class BeatmapDatasetIterable:
                 data["keycount"] = int(beatmap.circle_size)
                 data["hold_note_ratio"] = get_hold_note_ratio(beatmap)
             if gamemode in [1, 3]:
-                data["scroll_speed_ratio"] = get_scroll_speed_ratio(beatmap)
+                data["scroll_speed_ratio"] = get_scroll_speed_ratio(beatmap, self.args.mania_bpm_normalized_scroll_speed)
 
         def get_context(context: ContextType, identifier, add_type=True):
             data = {"extra": {"context_type": context, "add_type": add_type, "id": identifier + '_' + context.value}}
@@ -794,7 +794,10 @@ class BeatmapDatasetIterable:
             elif context == ContextType.KIAI:
                 data["events"], data["event_times"] = self.parser.parse_kiai(osu_beatmap, speed)
             elif context == ContextType.SV:
-                data["events"], data["event_times"] = self.parser.parse_scroll_speeds(osu_beatmap, speed)
+                if beatmap_metadata["ModeInt"] == 3:
+                    data["events"], data["event_times"] = self.parser.parse_scroll_speeds(osu_beatmap, speed)
+                else:
+                    data["events"], data["event_times"] = [], []
             return data
 
         extra_data = {
