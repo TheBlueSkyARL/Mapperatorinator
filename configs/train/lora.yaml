@@ -10,8 +10,8 @@ pretrained_path: "OliBomby/Mapperatorinator-v30"     # Path to pretrained model 
 
 data:                  # Data settings
   dataset_type: "mmrs"
-  train_dataset_path: ""
-  test_dataset_path: ""
+  train_dataset_path: "datasets/v30_dataset"
+  test_dataset_path: "datasets/v30_dataset"
   train_dataset_start: 0
   train_dataset_end: 38689
   test_dataset_start: 38689

@@ -211,7 +211,7 @@ def compile_args_from_beatmap(args: InferenceConfig, verbose=True):
         "creator": beatmap_config.creator,
         "version": beatmap_config.version,
         "source": beatmap_config.source,
-        "background": str(beatmap_path.parent / beatmap.background),
+        "background": str(beatmap_path.parent / beatmap.background) if beatmap.background else None,
         "preview_time": beatmap_config.preview_time,
     }
 
@@ -415,10 +415,16 @@ def generate(
 
     # Auto generate timing if not provided in in_context and required for the model and this output_type
     timing_events, timing_times, timing = None, None, None
-    if args.super_timing and ContextType.NONE in args.in_context:
+    if beatmap_path:
+        # Use timing from reference beatmap if available to avoid conflicting timing
+        timing = [tp for tp in Beatmap.from_path(Path(beatmap_path)).timing_points if tp.parent is None]
+        extra_in_context[ContextType.TIMING] = timing
+        if ContextType.TIMING in output_type:
+            output_type.remove(ContextType.TIMING)
+    elif args.super_timing and ContextType.NONE in args.in_context:
         super_timing_generator = SuperTimingGenerator(args, model, tokenizer)
         timing_events, timing_times = super_timing_generator.generate(audio, generation_config, verbose=verbose)
-        timing = postprocessor.generate_timing(timing_events)
+        timing = postprocessor.generate_timing(timing_events, single_bpm=args.force_single_bpm)
         extra_in_context[ContextType.TIMING] = timing
         if ContextType.TIMING in output_type:
             output_type.remove(ContextType.TIMING)
@@ -434,14 +440,10 @@ def generate(
             verbose=verbose,
         )[0]
         timing_events, timing_times = events_of_type(timing_events, timing_times, TIMING_TYPES)
-        timing = postprocessor.generate_timing(timing_events)
+        timing = postprocessor.generate_timing(timing_events, single_bpm=args.force_single_bpm)
         extra_in_context[ContextType.TIMING] = timing
         if ContextType.TIMING in output_type:
             output_type.remove(ContextType.TIMING)
-    elif ContextType.TIMING in args.in_context or (
-            args.train.data.add_timing and any(t in args.in_context for t in [ContextType.GD, ContextType.NO_HS])):
-        # Exact timing is provided in the other beatmap, so we don't need to generate it
-        timing = [tp for tp in Beatmap.from_path(Path(beatmap_path)).timing_points if tp.parent is None]
 
     # Generate beatmap
     if len(output_type) > 0:
@@ -458,7 +460,7 @@ def generate(
         events, _ = reduce(merge_events, result)
 
         if timing is None and (ContextType.TIMING in args.output_type or args.train.data.add_timing):
-            timing = postprocessor.generate_timing(events)
+            timing = postprocessor.generate_timing(events, single_bpm=args.force_single_bpm)
 
         # Resnap timing events
         if args.resnap_events and timing is not None:

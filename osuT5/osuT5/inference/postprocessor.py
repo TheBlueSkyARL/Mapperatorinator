@@ -334,7 +334,17 @@ class Postprocessor(object):
                 total_duration = group.time - slider_head.time
 
                 if total_duration <= 0 or span_duration <= 0:
-                    self.logger.warning(f"Warning: Invalid slider duration at {slider_start_time}")
+                    # Convert to hit circle instead of generating an invalid slider
+                    self.logger.info(f"Fixed invalid slider duration at {slider_start_time} by converting to circle")
+                    
+                    body_hitsound = self.get_hitsound(slider_head.hit_sound)
+                    body_sampleset = slider_head.sampleset
+                    body_addition = slider_head.addition
+                    
+                    hit_object_strings.append(
+                        f"{int(round(slider_head.x))},{int(round(slider_head.y))},{slider_start_time},{5 if slider_head.new_combo else 1},{body_hitsound},{body_sampleset}:{body_addition}:-1:0:"
+                    )
+                    
                     slider_head = None
                     last_anchor = None
                     anchor_info = []
@@ -449,7 +459,7 @@ class Postprocessor(object):
         end_time = timedelta(milliseconds=self.end_time) if self.end_time is not None else timedelta(days=999)
 
         # Remove all objects between start and end time
-        beatmap._hit_objects = [ho for ho in beatmap._hit_objects if ho.time < start_time or ho.time > end_time]
+        beatmap._hit_objects = [ho for ho in beatmap._hit_objects if getattr(ho, 'end_time', ho.time) < start_time or ho.time > end_time]
         # Also remove all timing points between start and end time
         beatmap.timing_points = [tp for tp in beatmap.timing_points if tp.offset < start_time or tp.offset > end_time]
 
@@ -464,6 +474,38 @@ class Postprocessor(object):
         # Sort the hit objects and timing points
         beatmap._hit_objects.sort(key=lambda ho: ho.time)
         beatmap.timing_points.sort(key=lambda tp: tp.offset)
+
+        # Deep fix overlaps and objects < 10ms apart to prevent AiMod errors
+        i = 0
+        while i < len(beatmap._hit_objects) - 1:
+            curr_ho = beatmap._hit_objects[i]
+            next_ho = beatmap._hit_objects[i + 1]
+            
+            curr_end = getattr(curr_ho, 'end_time', curr_ho.time)
+            gap = (next_ho.time - curr_end).total_seconds() * 1000
+            
+            if gap < 10:
+                if type(curr_ho).__name__ == "Slider":
+                    curr_duration = (curr_end - curr_ho.time).total_seconds() * 1000
+                    target_duration = (next_ho.time - curr_ho.time).total_seconds() * 1000 - 10
+                    
+                    if target_duration > 0 and curr_duration > 0:
+                        curr_ho.length = curr_ho.length * (target_duration / curr_duration)
+                        curr_ho.__dict__.pop('end_time', None)
+                        i += 1
+                    else:
+                        beatmap._hit_objects.pop(i + 1)
+                elif type(curr_ho).__name__ == "Spinner":
+                    target_end = next_ho.time - timedelta(milliseconds=10)
+                    if target_end > curr_ho.time:
+                        curr_ho.end_time = target_end
+                        i += 1
+                    else:
+                        beatmap._hit_objects.pop(i + 1)
+                else:
+                    beatmap._hit_objects.pop(i + 1)
+            else:
+                i += 1
 
         # If the SV or volume or BPM differs at the start time, add a new timing point
         if len(result_beatmap.timing_points) > 0 and len(beatmap.timing_points) > 0:
@@ -682,7 +724,7 @@ class Postprocessor(object):
 
         return None
 
-    def generate_timing(self, events: list[Event]) -> list[TimingPoint]:
+    def generate_timing(self, events: list[Event], single_bpm: bool = False) -> list[TimingPoint]:
         """Generate timing points from a list of Event objects."""
 
         markers: list[Postprocessor.Marker] = []
@@ -717,6 +759,17 @@ class Postprocessor(object):
             timing = [
                 TimingPoint(timedelta(milliseconds=markers[0].time), 1000, 4, 2, -1, 100, None, False)
             ]
+
+        if single_bpm and len(markers) > 1:
+            # Calculate a single best-fit BPM for the entire map
+            duration = markers[-1].time - markers[0].time
+            total_beats = sum(m.beats_from_last_marker for m in markers[1:])
+            
+            if total_beats > 0:
+                mpb = self.get_ms_per_beat(duration, total_beats, 0)
+                mpb = self.human_round_ms_per_beat(mpb, markers, timing[0])
+                timing[0].ms_per_beat = mpb
+                return [timing[0]]
 
         counter = 0
         last_measure_time = markers[0].time
