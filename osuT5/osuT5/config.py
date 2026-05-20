@@ -167,6 +167,8 @@ class DataloaderConfig:
     num_workers: int = 8
     pin_memory: bool = True
     drop_last: bool = False
+    balancer_buffer_size: int = 0
+    balancer_prefetch_factor: float = 0.5
 
 
 @dataclass

@@ -18,6 +18,7 @@ class InferenceConfig:
     output_path: Optional[str] = None  # Path to output directory
     beatmap_path: Optional[str] = None  # Path to .osu file to autofill metadata and use as reference
     lora_path: Optional[str] = None  # Path to LoRA weights
+    auto_select_gamemode_model: bool = True  # Automatically use a gamemode=<id> subdirectory in a local checkpoint or Hugging Face repo when available
 
     # Conditional generation settings
     gamemode: Optional[int] = None  # Gamemode of the beatmap
@@ -127,6 +128,10 @@ class FidConfig:
     dataset_start: int = 16200
     dataset_end: int = 16291
     gamemodes: list[int] = field(default_factory=lambda: [0])  # List of gamemodes to include in the dataset
+    min_year: Optional[int] = None
+    max_year: Optional[int] = None
+    min_difficulty: Optional[float] = None
+    max_difficulty: Optional[float] = None
 
     classifier_ckpt: str = 'OliBomby/osu-classifier'
     classifier_batch_size: int = 16

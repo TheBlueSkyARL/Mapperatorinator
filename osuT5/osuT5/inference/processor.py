@@ -580,6 +580,7 @@ class Processor(object):
     ):
         in_context = in_context or []
         out_context = out_context or []
+        requested_out_context = out_context.copy()
 
         # Merge extra in context with in context
         if extra_in_context is not None:
@@ -614,7 +615,8 @@ class Processor(object):
                 gen_out_context.remove(ContextType.SV)
 
         # We have to generate the out contexts in order of the template
-        out_context_count = max(all_out_context.index(oc) for oc in gen_out_context) + 1
+        requested_out_context = [oc for oc in requested_out_context if oc in gen_out_context]
+        out_context_count = max(all_out_context.index(oc) for oc in requested_out_context) + 1
         gen_out_context = all_out_context[:out_context_count]
 
         return gen_in_context, gen_out_context, req_special_tokens
@@ -880,6 +882,9 @@ class Processor(object):
     ) -> list[dict[str, Any]]:
         out = []
         for i, context in enumerate(out_context):
+            context_is_provided = context in given_context or (
+                extra_in_context is not None and context in extra_in_context
+            )
             context_data = self.get_context(
                 context,
                 beatmap_path=beatmap_path,
@@ -887,7 +892,7 @@ class Processor(object):
                 song_length=song_length,
                 add_type=self.add_out_context_types,
                 add_class=False,
-                finished=context in given_context,
+                finished=context_is_provided,
                 partial=self.add_to_beatmap and self.start_time is not None,
             )
 

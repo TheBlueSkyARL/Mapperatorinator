@@ -29,7 +29,7 @@ from osuT5.osuT5.inference.server import InferenceClient
 from osuT5.osuT5.inference.super_timing_generator import SuperTimingGenerator
 from osuT5.osuT5.model import Mapperatorinator
 from osuT5.osuT5.tokenizer import ContextType
-from osuT5.osuT5.utils import load_model_loaders
+from osuT5.osuT5.utils import load_model_loaders, resolve_model_checkpoint_path
 from osu_diffusion import DiT_models
 from osu_diffusion.config import DiffusionTrainConfig
 
@@ -372,6 +372,40 @@ def get_config(args: InferenceConfig):
     )
 
 
+def supports_explicit_timing_output(args: InferenceConfig) -> bool:
+    return any(ContextType.TIMING in context_type["out"] for context_type in args.train.data.context_types)
+
+
+def should_generate_timing_context(args: InferenceConfig, output_type: list[ContextType]) -> bool:
+    has_empty_or_none_context = len(args.in_context) == 0 or ContextType.NONE in args.in_context
+    return has_empty_or_none_context and supports_explicit_timing_output(args) and any(
+        context_type in output_type for context_type in [ContextType.TIMING, ContextType.MAP]
+    )
+
+
+def should_load_separate_timing_model(args: InferenceConfig, output_type: list[ContextType] | None = None) -> bool:
+    output_type = args.output_type if output_type is None else output_type
+    needs_generated_timing = (
+        args.super_timing and (len(args.in_context) == 0 or ContextType.NONE in args.in_context)
+    ) or should_generate_timing_context(args, output_type)
+
+    if not needs_generated_timing:
+        return False
+
+    current_ckpt_path, current_subfolder = resolve_model_checkpoint_path(
+        args.model_path,
+        gamemode=args.gamemode,
+        auto_select_gamemode_model=args.auto_select_gamemode_model,
+    )
+    base_ckpt_path, base_subfolder = resolve_model_checkpoint_path(
+        args.model_path,
+        gamemode=args.gamemode,
+        auto_select_gamemode_model=False,
+    )
+
+    return current_ckpt_path != base_ckpt_path or current_subfolder != base_subfolder
+
+
 def generate(
         args: InferenceConfig,
         *,
@@ -382,6 +416,8 @@ def generate(
         beatmap_config: BeatmapConfig,
         model: Mapperatorinator | InferenceClient,
         tokenizer,
+        timing_model: Mapperatorinator | InferenceClient | None = None,
+        timing_tokenizer=None,
         diff_model=None,
         diff_tokenizer=None,
         refine_model=None,
@@ -412,21 +448,22 @@ def generate(
     sequences = preprocessor.segment(audio)
     extra_in_context = {}
     output_type = args.output_type.copy()
+    timing_model = model if timing_model is None else timing_model
+    timing_tokenizer = tokenizer if timing_tokenizer is None else timing_tokenizer
 
     # Auto generate timing if not provided in in_context and required for the model and this output_type
     timing_events, timing_times, timing = None, None, None
-    if args.super_timing and ContextType.NONE in args.in_context:
-        super_timing_generator = SuperTimingGenerator(args, model, tokenizer)
+    if args.super_timing and (len(args.in_context) == 0 or ContextType.NONE in args.in_context):
+        super_timing_generator = SuperTimingGenerator(args, timing_model, timing_tokenizer)
         timing_events, timing_times = super_timing_generator.generate(audio, generation_config, verbose=verbose)
         timing = postprocessor.generate_timing(timing_events)
         extra_in_context[ContextType.TIMING] = timing
         if ContextType.TIMING in output_type:
             output_type.remove(ContextType.TIMING)
-    elif (ContextType.NONE in args.in_context and ContextType.MAP in output_type and
-          not any((ContextType.NONE in ctx["in"] or len(ctx["in"]) == 0) and ContextType.MAP in ctx["out"] for ctx in
-                  args.train.data.context_types)):
-        # Generate timing and convert in_context to timing context
-        timing_events, timing_times = processor.generate(
+    elif should_generate_timing_context(args, output_type):
+        # Generate timing context with the base model and reuse it for the main generation pass.
+        timing_processor = Processor(args, timing_model, timing_tokenizer)
+        timing_events, timing_times = timing_processor.generate(
             sequences=sequences,
             generation_config=generation_config,
             in_context=[ContextType.NONE],
@@ -510,7 +547,8 @@ def generate(
 
 def load_model_with_server(ckpt_path: str | Path | None, t5_args: TrainConfig, device, max_batch_size: int = 8,
                            use_server: bool = False, precision: str = "fp32", attn_implementation: str = "sdpa",
-                           eval_mode: bool = True, lora_path=None):
+                           eval_mode: bool = True, lora_path=None, gamemode: int | None = None,
+                           auto_select_gamemode_model: bool = True):
     model_loader, tokenizer_loader = load_model_loaders(
         ckpt_path=ckpt_path,
         t5_args=t5_args,
@@ -520,19 +558,38 @@ def load_model_with_server(ckpt_path: str | Path | None, t5_args: TrainConfig, d
         eval_mode=eval_mode,
         pickle_module=routed_pickle,
         lora_path=lora_path,
+        gamemode=gamemode,
+        auto_select_gamemode_model=auto_select_gamemode_model,
     )
+
     return InferenceClient(
         model_loader,
         tokenizer_loader,
         max_batch_size=max_batch_size,
-        socket_path=get_server_address(str(ckpt_path)),
+        socket_path=get_server_address(
+            ckpt_path,
+            gamemode=gamemode,
+            auto_select_gamemode_model=auto_select_gamemode_model,
+        ),
     ) if use_server else model_loader(), tokenizer_loader()
 
 
-def get_server_address(ckpt_path_str: str):
+def get_server_address(
+        ckpt_path_str: str | Path | None,
+        gamemode: int | None = None,
+        auto_select_gamemode_model: bool = True,
+):
     """
     Get a valid socket address for the OS and model version.
     """
+    resolved_ckpt_path, subfolder = resolve_model_checkpoint_path(
+        ckpt_path_str,
+        gamemode=gamemode,
+        auto_select_gamemode_model=auto_select_gamemode_model,
+    )
+    ckpt_path_str = "" if not resolved_ckpt_path else (resolved_ckpt_path.as_posix() if isinstance(resolved_ckpt_path, Path) else str(resolved_ckpt_path))
+    if subfolder:
+        ckpt_path_str = f"{ckpt_path_str}/{subfolder}"
     ckpt_path_str = ckpt_path_str.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(".", "_")
     # Check if the OS supports Unix sockets
     if os.name == 'posix':
@@ -579,7 +636,24 @@ def main(args: InferenceConfig):
     model, tokenizer = load_model_with_server(args.model_path, args.train, args.device,
                                               max_batch_size=args.max_batch_size, use_server=args.use_server,
                                               precision=args.precision, attn_implementation=args.attn_implementation,
-                                              lora_path=args.lora_path)
+                                              lora_path=args.lora_path, gamemode=args.gamemode,
+                                              auto_select_gamemode_model=args.auto_select_gamemode_model)
+
+    timing_model, timing_tokenizer = None, None
+    if should_load_separate_timing_model(args):
+        print("Using base model for timing generation.")
+        timing_model, timing_tokenizer = load_model_with_server(
+            args.model_path,
+            args.train,
+            args.device,
+            max_batch_size=args.max_batch_size,
+            use_server=args.use_server,
+            precision=args.precision,
+            attn_implementation=args.attn_implementation,
+            lora_path=args.lora_path,
+            gamemode=args.gamemode,
+            auto_select_gamemode_model=False,
+        )
 
     diff_model, diff_tokenizer, refine_model = None, None, None
     if args.generate_positions:
@@ -600,6 +674,8 @@ def main(args: InferenceConfig):
         beatmap_config=beatmap_config,
         model=model,
         tokenizer=tokenizer,
+        timing_model=timing_model,
+        timing_tokenizer=timing_tokenizer,
         diff_model=diff_model,
         diff_tokenizer=diff_tokenizer,
         refine_model=refine_model,
