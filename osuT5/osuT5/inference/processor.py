@@ -384,7 +384,7 @@ class Processor(object):
             tokens_per_second_meter = self._create_tokens_per_second_meter()
             iterator = tqdm(list(zip(range(n_windows), frame_times)), dynamic_ncols=True) if verbose else zip(range(n_windows), frame_times)
             for sequence_index, (wi, frame_time) in enumerate(iterator):
-                trim_lookback = sequence_index != 0 and self.types_first and self.lookback_time > 0
+                trim_lookback = sequence_index != 0 and self.lookback_time > 0
                 trim_lookahead = sequence_index != n_windows - 1
                 frame_time = frame_time.item()
 
