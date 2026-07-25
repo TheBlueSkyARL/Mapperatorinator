@@ -230,16 +230,20 @@ class SuperTimingGenerator:
                     remove_range(previous_time, time)
                     break
 
-                nearest_peak: tuple = min(peaks, key=lambda x: loss(x, time))
-                if loss(nearest_peak, time) < 60:
-                    time = nearest_peak[0]
-                    period_ms = 60_000 / nearest_peak[2]
-                else:
-                    if loss(nearest_peak, time) < 300 and nearest_peak[3]:
-                        # There is a beat nearby, but it's likely on another BPM
-                        time -= direction * period_ms
-                        break
-                    # There is no beat nearby, so make an imaginary beat
+                # Limit the search to only peaks that progress forward in time,
+                # to prevent infinite loops of snapping to the same high prominence peak
+                next_peaks = [p for p in peaks if direction * (p[0] - previous_time) > 0]
+                if len(next_peaks) > 0:
+                    nearest_peak: tuple = min(next_peaks, key=lambda x: loss(x, time))
+                    if loss(nearest_peak, time) < 60:
+                        time = nearest_peak[0]
+                        period_ms = 60_000 / nearest_peak[2]
+                    else:
+                        if loss(nearest_peak, time) < 300 and nearest_peak[3]:
+                            # There is a beat nearby, but it's likely on another BPM
+                            time -= direction * period_ms
+                            break
+                        # There is no beat nearby, so make an imaginary beat
 
                 if any(t1 <= time <= t2 for t1, t2 in processed_regions):
                     # This beat has already been processed
