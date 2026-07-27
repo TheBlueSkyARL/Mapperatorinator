@@ -86,20 +86,6 @@ def _cuda_native_bf16() -> bool:
         return torch.cuda.is_bf16_supported()
 
 
-def _cuda_native_fp16() -> bool:
-    """Whether the current CUDA device supports native fp16 as a useful fallback.
-
-    ROCm devices expose CUDA APIs through torch and generally provide native
-    fp16 support. On NVIDIA, native fp16 arithmetic is available from sm_53
-    onward.
-    """
-    if getattr(torch.version, "hip", None) is not None:
-        return True
-
-    major, minor = torch.cuda.get_device_capability()
-    return (major, minor) >= (5, 3)
-
-
 def compile_device_and_seed(args: InferenceConfig, verbose=True):
     message = None
     if args.device == "auto":
@@ -130,19 +116,16 @@ def compile_device_and_seed(args: InferenceConfig, verbose=True):
 
     # Resolve precision against the device. bf16 is the default, but low
     # precision only helps on CUDA, and native bf16 needs hardware support
-    # (Ampere or newer on NVIDIA). When bf16 is unavailable, prefer native
-    # fp16 if the GPU supports it; otherwise fall back to fp32.
+    # (Ampere or newer on NVIDIA); emulated bf16 on older GPUs is slower than
+    # fp32. Fall back to fp32 there rather than risk fp16 numerics.
     message = None
     if args.precision in ("bf16", "fp16") and args.device != "cuda":
         message = f"{args.precision} precision requires CUDA; using fp32 on '{args.device}'."
         args.precision = "fp32"
     elif args.precision == "bf16" and args.device == "cuda" and not _cuda_native_bf16():
-        if _cuda_native_fp16():
-            message = "GPU does not natively support bf16; falling back to fp16."
-            args.precision = "fp16"
-        else:
-            message = "GPU does not natively support bf16 or fp16; falling back to fp32."
-            args.precision = "fp32"
+        message = ("GPU does not natively support bf16; falling back to fp32. "
+                   "Set precision=fp16 manually if your GPU has fast fp16.")
+        args.precision = "fp32"
 
     if verbose and message is not None:
         print(message)
